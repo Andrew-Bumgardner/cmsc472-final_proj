@@ -58,41 +58,47 @@ class AnnotationTool(QMainWindow):
         self.frame_label.setStyleSheet("QLabel { background-color: black; }")
         frame_layout.addWidget(self.frame_label)
 
-        nav_layout = QHBoxLayout()
-        nav_layout.setContentsMargins(0, 5, 0, 0)
-
-        self.prev_10_btn = QPushButton("◀◀")
-        self.prev_btn = QPushButton("◀")
+        # Add frame count QLabel
         self.frame_count = QLabel("Frame: 0 / 0")
-        self.next_btn = QPushButton("▶")
-        self.next_10_btn = QPushButton("▶▶")
-
-        for btn in [self.prev_10_btn, self.prev_btn, self.next_btn, self.next_10_btn]:
-            btn.setFixedWidth(100)
-
-        self.prev_10_btn.clicked.connect(lambda: self.jump_frames(-10))
-        self.prev_btn.clicked.connect(lambda: self.jump_frames(-1))
-        self.next_btn.clicked.connect(lambda: self.jump_frames(1))
-        self.next_10_btn.clicked.connect(lambda: self.jump_frames(10))
-
         self.frame_count.setAlignment(Qt.AlignCenter)
-        self.frame_count.setMinimumWidth(120)
+        layout.addWidget(self.frame_count)  # Add to the main layout
 
-        nav_layout.addStretch()
-        nav_layout.addWidget(self.prev_10_btn)
-        nav_layout.addWidget(self.prev_btn)
-        nav_layout.addWidget(self.frame_count)
-        nav_layout.addWidget(self.next_btn)
-        nav_layout.addWidget(self.next_10_btn)
-        nav_layout.addStretch()
+        # Range selection UI
+        self.start_slider = QSlider(Qt.Horizontal)
+        self.start_slider.setRange(0, 0)  # Updated after frames are loaded
+        self.start_slider.valueChanged.connect(self.update_range_label)
 
-        frame_layout.addLayout(nav_layout)
+        self.end_slider = QSlider(Qt.Horizontal)
+        self.end_slider.setRange(0, 0)  # Updated after frames are loaded
+        self.end_slider.valueChanged.connect(self.update_range_label)
+
+        self.range_label = QLabel("Range: 0 - 0")
+
+        layout.addWidget(QLabel("Start Frame:"))
+        layout.addWidget(self.start_slider)
+        layout.addWidget(QLabel("End Frame:"))
+        layout.addWidget(self.end_slider)
+        layout.addWidget(self.range_label)
+
+        self.assign_range_btn = QPushButton("Assign Label to Range")
+        self.assign_range_btn.clicked.connect(self.assign_label_to_range)
+        layout.addWidget(self.assign_range_btn)
+
         layout.addWidget(frame_container)
 
+        # Add frame slider with current frame label
+        slider_layout = QHBoxLayout()
         self.frame_slider = QSlider(Qt.Horizontal)
         self.frame_slider.valueChanged.connect(self.slider_changed)
-        layout.addWidget(self.frame_slider)
 
+        self.current_frame_label = QLabel("Current Frame: 0")
+        self.current_frame_label.setAlignment(Qt.AlignRight)
+        slider_layout.addWidget(self.frame_slider)
+        slider_layout.addWidget(self.current_frame_label)
+
+        layout.addLayout(slider_layout)
+
+        # Event layout remains the same
         event_layout = QHBoxLayout()
         event_layout.setSpacing(20)
         self.event_group = QButtonGroup()
@@ -103,7 +109,7 @@ class AnnotationTool(QMainWindow):
             event_layout.addWidget(radio)
             if event_name == "no_event":
                 radio.setChecked(True)
-
+            
         event_layout.addStretch()
         self.mark_btn = QPushButton("Mark Event")
         self.mark_btn.clicked.connect(self.mark_event)
@@ -121,6 +127,8 @@ class AnnotationTool(QMainWindow):
         self.statusBar.showMessage("Ready")
 
         self.setMinimumSize(800, 700)
+
+
 
     def _create_shortcuts(self):
         from PyQt5.QtWidgets import QShortcut
@@ -155,8 +163,44 @@ class AnnotationTool(QMainWindow):
         if self.frames:
             self.frame_index = 0
             self.frame_slider.setRange(0, len(self.frames)-1)
+            self.start_slider.setRange(0, len(self.frames)-1)
+            self.end_slider.setRange(0, len(self.frames)-1)
+            self.start_slider.setValue(0)
+            self.end_slider.setValue(len(self.frames)-1)
+            self.update_range_label()
             self.update_display()
             self.statusBar.showMessage(f"Loaded {len(self.frames)} frames from {self.current_game_id}")
+
+    def update_range_label(self):
+        start_frame = self.start_slider.value()
+        end_frame = self.end_slider.value()
+        if start_frame > end_frame:
+            self.end_slider.setValue(start_frame)  # Ensure valid range
+        self.range_label.setText(f"Range: {start_frame} - {end_frame}")
+    
+    def assign_label_to_range(self):
+        start_frame = self.start_slider.value()
+        end_frame = self.end_slider.value()
+        event_id = self.event_group.checkedId()  # Get the selected event type
+        if event_id == -1:
+            self.statusBar.showMessage("No event type selected")
+            return
+
+        for frame_idx in range(start_frame, end_frame + 1):
+            if self.current_game_id not in self.annotations:
+                self.annotations[self.current_game_id] = []
+            self.annotations[self.current_game_id] = [
+                (frame, evt) for frame, evt in self.annotations[self.current_game_id]
+                if frame < start_frame or frame > end_frame
+            ]
+            self.annotations[self.current_game_id].append((frame_idx, event_id))
+
+        self.annotations[self.current_game_id].sort()
+        self.update_annotations_display()
+        self.statusBar.showMessage(f"Labeled frames {start_frame} to {end_frame} as {self.event_types[event_id]}")
+
+
+
 
     def update_display(self):
         if not self.frames:
@@ -173,7 +217,7 @@ class AnnotationTool(QMainWindow):
         qt_image = QImage(frame.data, w, h, ch * w, QImage.Format_RGB888)
         self.frame_label.setPixmap(QPixmap.fromImage(qt_image))
 
-        self.frame_count.setText(f"Frame: {self.frame_index+1} / {len(self.frames)}")
+        self.frame_count.setText(f"Frame: {self.frame_index+1} / {len(self.frames)}")  # Fixed
         self.frame_slider.setValue(self.frame_index)
 
         self.update_annotations_display()
@@ -187,7 +231,9 @@ class AnnotationTool(QMainWindow):
 
     def slider_changed(self, value):
         self.frame_index = value
+        self.current_frame_label.setText(f"Current Frame: {self.frame_index + 1}")
         self.update_display()
+
 
     def mark_event(self):
         if not self.frames or not self.current_game_id:
